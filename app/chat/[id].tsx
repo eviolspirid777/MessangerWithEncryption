@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Mic, Paperclip, Send } from "lucide-react-native";
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -11,6 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useBLEMessaging } from "@/shared/hooks/useBLEMessaging";
+import { Message as BLEMessage } from "@/shared/types/Message";
+import { getDeviceId } from "@/shared/utils/deviceId";
+import { useBLEDeviceDiscovery } from "@/shared/hooks/useBLEDeviceDiscovery";
 
 interface Message {
   id: string;
@@ -19,42 +23,47 @@ interface Message {
   sent: boolean;
 }
 
-const mockMessages: Message[] = [
-  { id: "1", text: "Привет!", time: "14:30", sent: false },
-  { id: "2", text: "Привет! Как дела?", time: "14:32", sent: true },
-  { id: "3", text: "Отлично, спасибо!", time: "14:33", sent: false },
-  {
-    id: "4",
-    text: "Сегодня отличная погода",
-    time: "14:33",
-    sent: false,
-  },
-  {
-    id: "5",
-    text: "Да, согласен! Может прогуляемся?",
-    time: "14:35",
-    sent: true,
-  },
-];
-
 export default function ChatScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  
+  // Получаем deviceId из параметров (id чата может быть deviceId устройства)
+  const targetDeviceId = useMemo(() => {
+    return typeof id === "string" ? id : undefined;
+  }, [id]);
 
-  const handleSend = () => {
-    if (message.trim()) {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        text: message,
-        time: new Date().toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        sent: true,
-      };
-      setMessages([...messages, newMessage]);
+  // Используем BLE messaging
+  const { messages: bleMessages, sendMessage, sending } = useBLEMessaging(
+    targetDeviceId
+  );
+  const { devices } = useBLEDeviceDiscovery();
+
+  // Находим имя устройства по deviceId
+  const deviceName = useMemo(() => {
+    if (!targetDeviceId) return "Broadcast";
+    const device = devices.find((d) => d.deviceId === targetDeviceId);
+    return device?.name || "Unknown Device";
+  }, [targetDeviceId, devices]);
+
+  // Преобразуем BLE сообщения в формат для UI
+  const messages: Message[] = useMemo(() => {
+    const currentDeviceId = getDeviceId();
+    return bleMessages.map((bleMsg: BLEMessage) => ({
+      id: bleMsg.id,
+      text: bleMsg.text,
+      time: new Date(bleMsg.timestamp).toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      sent: bleMsg.senderId === currentDeviceId,
+    }));
+  }, [bleMessages]);
+
+  const handleSend = async () => {
+    if (message.trim() && !sending) {
+      const receiverId = targetDeviceId || "broadcast";
+      await sendMessage(message, receiverId);
       setMessage("");
     }
   };
@@ -77,8 +86,10 @@ export default function ChatScreen() {
             <Text style={styles.avatarTextSmall}>А</Text>
           </View>
           <View>
-            <Text style={styles.headerName}>Андрей</Text>
-            <Text style={styles.headerStatus}>В сети</Text>
+            <Text style={styles.headerName}>{deviceName}</Text>
+            <Text style={styles.headerStatus}>
+              {targetDeviceId ? "В сети" : "Broadcast"}
+            </Text>
           </View>
         </View>
         <View style={styles.headerSpacer} />
@@ -131,7 +142,11 @@ export default function ChatScreen() {
           maxLength={500}
         />
         {message.trim() ? (
-          <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
+          <TouchableOpacity
+            style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+            onPress={handleSend}
+            disabled={sending}
+          >
             <Send size={20} color="#ffffff" />
           </TouchableOpacity>
         ) : (
@@ -288,5 +303,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginLeft: 8,
+  },
+  sendButtonDisabled: {
+    opacity: 0.5,
   },
 });

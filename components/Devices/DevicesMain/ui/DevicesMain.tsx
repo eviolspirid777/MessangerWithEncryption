@@ -1,22 +1,29 @@
 import { Device } from "@/shared/types/Device";
-import { useState } from "react";
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View, ScrollView } from "react-native";
 import { DeviceItem } from "../DeviceItem/DeviceItem";
-
-const mockDevices: Device[] = [
-  { id: "1", name: "iPhone Андрей", distance: "2m", connected: true },
-  { id: "2", name: "Samsung Мария", distance: "5m", connected: false },
-  { id: "3", name: "Pixel Дмитрий", distance: "10m", connected: false },
-];
+import { useBLEDeviceDiscovery } from "@/shared/hooks/useBLEDeviceDiscovery";
+import { useBLEConnection } from "@/shared/hooks/useBLEConnection";
 
 export const DevicesMain = () => {
-  const [devices, setDevices] = useState<Device[]>(mockDevices);
+  const { devices, getBLEDevice } = useBLEDeviceDiscovery();
+  const { connect, disconnect, isConnected } = useBLEConnection();
+
+  const handleDevicePress = async (device: Device) => {
+    try {
+      if (isConnected(device.id)) {
+        await disconnect(device.id);
+      } else {
+        const bleDevice = getBLEDevice(device.id);
+        if (bleDevice) {
+          await connect(bleDevice);
+        } else {
+          console.warn("Device not found, please scan first");
+        }
+      }
+    } catch (error) {
+      console.error("Error toggling device connection:", error);
+    }
+  };
 
   return (
     <>
@@ -32,11 +39,23 @@ export const DevicesMain = () => {
         style={styles.deviceList}
         showsVerticalScrollIndicator={false}
       >
-        {devices.map((device) => (
-          <TouchableOpacity key={device.id} style={styles.deviceItem}>
-            <DeviceItem deviceItem={device} />
-          </TouchableOpacity>
-        ))}
+        {devices.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>
+              Устройства не найдены. Нажмите "Сканировать" для поиска.
+            </Text>
+          </View>
+        ) : (
+          devices.map((device) => (
+            <TouchableOpacity
+              key={device.id}
+              style={styles.deviceItem}
+              onPress={() => handleDevicePress(device)}
+            >
+              <DeviceItem deviceItem={device} />
+            </TouchableOpacity>
+          ))
+        )}
       </ScrollView>
     </>
   );
@@ -59,6 +78,17 @@ const styles = StyleSheet.create({
   },
   deviceList: {
     flex: 1,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 40,
+  },
+  emptyStateText: {
+    fontSize: 15,
+    color: "#6b7280",
+    textAlign: "center",
   },
   deviceItem: {
     flexDirection: "row",
