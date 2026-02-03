@@ -1,54 +1,46 @@
+import { useChats } from "@/shared/hooks/useChats";
 import { Chat } from "@/shared/types/Chat";
 import { useRouter } from "expo-router";
-import { ScrollView, StyleSheet, TouchableOpacity } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Avatar } from "../Avatar/Avatar";
 import { ChatContent } from "../ChatContent/ChatContent";
 
-const mockChats: Chat[] = [
-  {
-    id: "1",
-    name: "Андрей",
-    lastMessage: "Привет! Как дела?",
-    time: "14:32",
-    unread: 2,
-    online: true,
-  },
-  {
-    id: "2",
-    name: "Мария",
-    lastMessage: "Увидимся завтра",
-    time: "13:15",
-    unread: 0,
-    online: true,
-  },
-  {
-    id: "3",
-    name: "Дмитрий",
-    lastMessage: "Отправил тебе файлы",
-    time: "Вчера",
-    unread: 0,
-    online: false,
-  },
-  {
-    id: "4",
-    name: "Елена",
-    lastMessage: "Спасибо за помощь!",
-    time: "Вчера",
-    unread: 5,
-    online: false,
-  },
-];
-
 export const ChatMainBlock = () => {
   const router = useRouter();
+  const { chats, loading, markChatAsRead } = useChats();
+
+  const handleChatPress = (chat: Chat) => {
+    // Отмечаем чат как прочитанный при открытии
+    markChatAsRead(chat.id);
+    router.push(`/chat/${chat.id}`);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>Загрузка чатов...</Text>
+      </View>
+    );
+  }
+
+  if (chats.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>Нет чатов</Text>
+        <Text style={styles.emptySubtext}>
+          Нажмите на плюсик, чтобы создать новый чат
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.chatList} showsVerticalScrollIndicator={false}>
-      {mockChats.map((chat) => (
+      {chats.map((chat) => (
         <TouchableOpacity
           key={chat.id}
           style={styles.chatItem}
-          onPress={() => router.push(`/chat/${chat.id}`)}
+          onPress={() => handleChatPress(chat)}
         >
           <Avatar chatLogoLetter={chat.name[0]} online={chat.online} />
           <ChatContent chat={chat} />
@@ -69,5 +61,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: "#9ca3af",
+    textAlign: "center",
+    paddingHorizontal: 40,
   },
 });

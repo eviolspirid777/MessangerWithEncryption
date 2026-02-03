@@ -28,6 +28,8 @@ class BLEService {
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
   private scanSubscription: Subscription | null = null;
   private processedMessageIds: Set<string> = new Set();
+  // Маппинг между BLE device ID и deviceId пользователя
+  private bleDeviceIdToUserIdMap: Map<string, string> = new Map();
 
   constructor() {
     this.manager = new BleManager();
@@ -100,13 +102,14 @@ class BLEService {
 
       // Сканируем все устройства (null означает сканировать все)
       // В реальном приложении можно фильтровать по имени или другим параметрам
-      this.scanSubscription = await this.manager.startDeviceScan(
+      this.manager.startDeviceScan(
         null, // Сканируем все устройства
         { allowDuplicates: false },
         (error, device) => {
           if (error) {
             console.error("Scan error:", error);
             this.isScanning = false;
+            this.manager.stopDeviceScan();
             return;
           }
 
@@ -116,7 +119,7 @@ class BLEService {
             
             // Автоматически подключаемся к найденному устройству
             // В реальном приложении можно добавить фильтрацию по имени или другим параметрам
-            this.connectToDevice(device);
+            // this.connectToDevice(device);
           }
         }
       );
@@ -132,11 +135,7 @@ class BLEService {
    * Останавливает сканирование
    */
   async stopScanning(): Promise<void> {
-    if (this.scanSubscription) {
-      this.manager.stopDeviceScan();
-      this.scanSubscription.remove();
-      this.scanSubscription = null;
-    }
+    this.manager.stopDeviceScan();
     this.isScanning = false;
     console.log("BLE Service: Scanning stopped");
   }
@@ -165,6 +164,9 @@ class BLEService {
 
       // Отправляем свой deviceId новому устройству
       await this.sendDeviceId(connectedDevice);
+
+      // Получаем deviceId пользователя от подключенного устройства
+      await this.receiveDeviceId(connectedDevice, deviceId);
 
       console.log(`BLE Service: Connected to device ${deviceId}`);
 
@@ -322,6 +324,41 @@ class BLEService {
   }
 
   /**
+   * Получает deviceId пользователя от подключенного устройства
+   * и сохраняет маппинг между BLE device ID и deviceId пользователя
+   */
+  private async receiveDeviceId(device: Device, bleDeviceId: string): Promise<void> {
+    try {
+      const services = await device.services();
+      const service = services.find((s) => s.uuid === MESSAGE_SERVICE_UUID);
+      
+      if (!service) {
+        return;
+      }
+
+      const characteristics = await service.characteristics();
+      const characteristic = characteristics.find(
+        (c) => c.uuid === DEVICE_ID_CHARACTERISTIC_UUID
+      );
+      
+      if (!characteristic) {
+        return;
+      }
+
+      // Читаем deviceId пользователя от устройства
+      const characteristicValue = await characteristic.read();
+      if (characteristicValue?.value) {
+        const userDeviceId = this.base64ToString(characteristicValue.value);
+        // Сохраняем маппинг: BLE device ID -> deviceId пользователя
+        this.bleDeviceIdToUserIdMap.set(bleDeviceId, userDeviceId);
+        console.log(`BLE Service: Mapped BLE device ${bleDeviceId} to user deviceId ${userDeviceId}`);
+      }
+    } catch (error) {
+      console.error("Error receiving device ID:", error);
+    }
+  }
+
+  /**
    * Обрабатывает полученное сообщение
    */
   private handleReceivedMessage(message: Message, senderDeviceId: string): void {
@@ -339,22 +376,65 @@ class BLEService {
       this.processedMessageIds.delete(firstId);
     }
 
-    // Если сообщение не для нас и не broadcast, игнорируем
-    if (message.receiverId !== "broadcast" && message.receiverId !== this.deviceId) {
-      // Но все равно ретранслируем для broadcast
-      if (message.type === "relay" || message.receiverId === "broadcast") {
-        this.relayMessage(message, senderDeviceId);
-      }
+    // Проверяем, для нас ли сообщение:
+    // 1. По deviceId пользователя (генерируется через getDeviceId)
+    // 2. По BLE device ID (ID устройства в Bluetooth сети)
+    // 3. Broadcast сообщения
+    const isForThisDevice =
+      message.receiverId === this.deviceId ||
+      message.receiverId === "broadcast" ||
+      this.isMessageForThisBLEDevice(message.receiverId);
+
+    // Если сообщение не для нас — просто ретранслируем дальше по сети
+    if (!isForThisDevice) {
+      this.relayMessage(message, senderDeviceId);
       return;
     }
 
-    // Уведомляем подписчиков о новом сообщении
+    // Сообщение адресовано нам (или это broadcast) — показываем в приложении
     this.notifyMessageReceived(message);
 
-    // Ретранслируем сообщение другим устройствам (broadcast relay)
+    // Если это broadcast, продолжим ретранслировать его дальше
     if (message.receiverId === "broadcast") {
       this.relayMessage(message, senderDeviceId);
     }
+  }
+
+  /**
+   * Проверяет, является ли receiverId BLE device ID текущего устройства
+   * В децентрализованной сети сообщения могут маршрутизироваться по BLE device ID
+   */
+  private isMessageForThisBLEDevice(receiverId: string): boolean {
+    // Проверяем маппинг: если receiverId является BLE device ID,
+    // и мы знаем, что этот BLE device ID соответствует нашему deviceId пользователя,
+    // то сообщение для нас
+    const mappedUserId = this.bleDeviceIdToUserIdMap.get(receiverId);
+    if (mappedUserId && mappedUserId === this.deviceId) {
+      return true;
+    }
+
+    // Также проверяем обратный маппинг: если receiverId является deviceId пользователя,
+    // и мы знаем BLE device ID, который соответствует этому deviceId
+    for (const [bleDeviceId, userId] of this.bleDeviceIdToUserIdMap.entries()) {
+      if (userId === receiverId && this.isOurBLEDeviceId(bleDeviceId)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Проверяет, является ли указанный BLE device ID нашим собственным
+   * В текущей реализации мы не можем напрямую определить наш BLE device ID,
+   * но можем использовать эвристику: если это один из подключенных устройств,
+   * и мы знаем, что он соответствует нашему deviceId
+   */
+  private isOurBLEDeviceId(bleDeviceId: string): boolean {
+    // В идеале нужно получить наш собственный BLE device ID от системы
+    // Пока что возвращаем false, так как мы не можем напрямую определить это
+    // Система будет работать через ретрансляцию и проверку deviceId пользователя
+    return false;
   }
 
   /**
