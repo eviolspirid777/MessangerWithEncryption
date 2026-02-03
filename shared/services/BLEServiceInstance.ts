@@ -1,12 +1,12 @@
+import { Message } from "@/shared/types/Message";
+import { getDeviceId } from "@/shared/utils/deviceId";
+import { Alert } from "react-native";
 import {
   BleManager,
   Device,
-  Characteristic,
   State,
   Subscription,
 } from "react-native-ble-plx";
-import { Message } from "@/shared/types/Message";
-import { getDeviceId } from "@/shared/utils/deviceId";
 
 // UUID для нашего сервиса и характеристик
 const MESSAGE_SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
@@ -87,6 +87,11 @@ class BLEService {
     try {
       const state = await this.manager.state();
       if (state !== State.PoweredOn) {
+        Alert.alert(
+          "Bluetooth выключен",
+          "Включите Bluetooth на устройстве, чтобы начать сканирование.",
+          [{ text: "OK" }]
+        );
         console.warn("Bluetooth is not powered on");
         return;
       }
@@ -95,7 +100,7 @@ class BLEService {
 
       // Сканируем все устройства (null означает сканировать все)
       // В реальном приложении можно фильтровать по имени или другим параметрам
-      this.scanSubscription = this.manager.startDeviceScan(
+      this.scanSubscription = await this.manager.startDeviceScan(
         null, // Сканируем все устройства
         { allowDuplicates: false },
         (error, device) => {

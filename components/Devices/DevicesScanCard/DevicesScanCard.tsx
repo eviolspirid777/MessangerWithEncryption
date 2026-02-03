@@ -1,6 +1,6 @@
-import { Bluetooth, RefreshCw } from "lucide-react-native";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useBLEDeviceDiscovery } from "@/shared/hooks/useBLEDeviceDiscovery";
+import { Bluetooth, RefreshCw } from "lucide-react-native";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 export const DevicesScanCard = () => {
   const { scanning, startScan, stopScan } = useBLEDeviceDiscovery();
